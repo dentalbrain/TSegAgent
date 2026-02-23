@@ -21,79 +21,79 @@ ac = AnatomyColors()
 PROMPTS = [
 
     '''
-    用户给出的图像是同一患者不同视角的完整的牙列图像，分别从偏顶面（左上）、咬合面（右上）、正面（左中）、两侧（右中、左下）五处绘制了可见区域，第一张已用黑色方框标注 %d-%d 若干个ID区域，按照牙弓顺序排列，第二张是不带文本标记的相同分割。每颗牙齿在点云上的OBB体积为：%s。
-    接下来的任务中，牙齿体积仅用作参考，会因为被牙龈埋伏等原因导致与真实大小差异较大。
-    找出图中牙龈乳头、口腔内壁、软组织等显著的非牙齿区域，以json格式返回他们的ID:{"results": [<id>, ...]}，如果没有，则返回{"results": []}。注意，不要将可能是牙齿的局部mask识别为非牙齿区域。牙龈乳头、口腔内壁等在形态上类似牙齿，而不是大片的区域，请结合图像仔细寻找。
+    The images provided by the user show the complete dentition of the same patient from different viewing angles, rendered from five visible regions: oblique occlusal view (top-left), occlusal view (top-right), frontal view (middle-left), and two lateral views (middle-right, bottom-left). The first image has %d-%d ID regions annotated with black bounding boxes, arranged in dental arch order. The second image shows the same segmentation without text labels. The OBB volume of each tooth on the point cloud is: %s.
+    In the following tasks, tooth volume is for reference only, as it may differ significantly from the actual size due to reasons such as gingival impaction.
+    Identify significant non-tooth regions in the images, such as gingival papillae, oral cavity inner walls, and soft tissues. Return their IDs in JSON format: {"results": [<id>, ...]}. If none exist, return {"results": []}. Note: do not identify partial tooth masks as non-tooth regions. Gingival papillae and oral cavity inner walls are morphologically similar to teeth rather than large areas; please carefully examine the images to find them.
     ''',
 
     '''
-    任务：结合你判断的非牙齿区域，找出图中的中切牙，以json格式返回他们的ID数组: {"results": [<id>, ...]}。如果不存在，则返回{"results": []}。
+    Task: Based on the non-tooth regions you identified, find the central incisors in the images and return their ID array in JSON format: {"results": [<id>, ...]}. If none exist, return {"results": []}.
 
-    严格判定规则（按优先级执行）：
+    Strict determination rules (execute by priority):
 
-    1. 中线锚点原则（最高优先级）
-    - 必须首先确定牙弓的左右对称结构
-    - 图片中的模型可能存在旋转，因此需要根据实际牙弓结构进行判断
-    - 中切牙是左右牙列在中线处分界的那一颗或一对牙
+    1. Midline anchor principle (highest priority)
+    - The bilateral symmetric structure of the dental arch must be determined first
+    - The model in the images may be rotated, so judgment should be based on the actual dental arch structure
+    - Central incisors are the tooth or pair of teeth at the midline boundary between the left and right dentition
 
-    2. 中线条件（必须同时满足）：
-    - 若是两颗牙，则两颗牙直接相邻
-    - 其间不存在第三颗牙
-    - 它们的分界位置对应牙弓左右结构的对称轴
-    - 它们应具有相似的牙齿形态特征（大小、形状等）
+    2. Midline conditions (all must be satisfied):
+    - If there are two teeth, they must be directly adjacent
+    - No third tooth exists between them
+    - Their boundary position corresponds to the symmetry axis of the dental arch's left-right structure
+    - They should have similar dental morphological features (size, shape, etc.)
     ''',
 
     '''
-    根据你给出的中切牙和非牙齿区域信息为参考，执行以下任务。
-    现在你需要逐一分析每个ID牙齿的形态，他们在牙弓上相对于其他牙齿的位置，以及他们可能对应的牙齿类型。
-    由于分割算法限制，可能会将一颗牙齿分出多个ID区域标记（属于同一颗牙齿的ID需要告诉我），因此在分析牙齿形状时，优先根据你看到的模型上的牙齿、而不是以ID标记为依据，避免将属于一颗牙齿的几个ID分到不同的牙齿上。
-    同理，也可能会将多颗牙齿分割为一个ID区域，你需要将这一区域认定为bad_id，并将其FDI设为none。
-    对于中切牙，他们通常位于牙弓最前端，有较明显的切缘，没有明显的牙尖突起。对于侧切牙，他们通常位于中切牙两侧，有较明显的切缘，没有明显的牙尖突起。对于尖牙，通常只有一处较高的尖牙突起，以及少许不高的突起，且会向唇侧有鼓起的牙冠面；它们通常会与切牙形似，所以你需要尽可能地将像尖牙的牙齿分类为尖牙。对于前磨牙，一般有两处较高突起，且整体大小与前牙相近。对于后磨牙，一般有3处以上的牙尖，较大较圆的牙窝，以及若干不高的突起。后磨牙通常会比前磨牙更大。对于智齿，通常在口扫模型中不会出现，或大部分埋伏在牙龈内；他们与后磨牙具有相似的外形，且判定时，只有单侧后磨牙的数量为3时，第3后磨牙才判定为智齿。
-    对于有较重磨损的牙齿，通常不会有明显的牙尖突起，但整体的大小及外观相对固定。
-    此外，你需要判定是否有非牙齿的区域。通常，这些区域在外形上近似牙齿，但可能将牙龈乳头识别为牙齿。
-    牙龈乳头是牙龈在牙齿相邻间隙的楔形软组织突起，其形态特点是位于牙龈软组织上，与真实的牙齿紧密贴合，呈现三角状；位置通常在两颗牙齿之间的间隙中，不形成独立的“牙冠”轮廓，无咬合面。
-    最后，根据牙齿类型赋予每个ID一个FDI标签；对于上颌模型，画面左侧对应患者的左侧（2*），画面右侧对应患者的右侧（1*）；对于下颌模型，画面左侧对应患者右侧（4*），画面右侧对应患者左侧（3*）。
+    Using the central incisors and non-tooth region information you provided as reference, perform the following task.
+    You need to analyze the morphology of each ID tooth one by one, their positions relative to other teeth on the dental arch, and their likely corresponding tooth types.
+    Due to segmentation algorithm limitations, a single tooth may be split into multiple ID regions (IDs belonging to the same tooth need to be reported to me). Therefore, when analyzing tooth shape, prioritize what you see on the model rather than the ID labels, to avoid assigning multiple IDs of the same tooth to different teeth.
+    Similarly, multiple teeth may be segmented as a single ID region; you should mark such regions as bad_id and set their FDI to none.
+    For central incisors, they are usually located at the very front of the dental arch, with a distinct incisal edge and no prominent cusp. For lateral incisors, they are usually located on both sides of the central incisors, with a distinct incisal edge and no prominent cusp. For canines, there is typically one prominent cusp with a few minor ridges, and the crown surface bulges toward the labial side; they often resemble incisors, so you should classify teeth that look like canines as canines whenever possible. For premolars, there are generally two prominent cusps, and their overall size is similar to anterior teeth. For molars, there are generally 3 or more cusps, a large and rounded fossa, and several minor ridges. Molars are usually larger than premolars. For wisdom teeth, they typically do not appear in intraoral scan models, or are mostly impacted within the gingiva; they have a similar shape to molars, and should only be classified as wisdom teeth when there are 3 posterior molars on one side, with the 3rd being the wisdom tooth.
+    For teeth with heavy wear, there are usually no prominent cusps, but the overall size and appearance remain relatively consistent.
+    Additionally, you need to determine whether there are non-tooth regions. Typically, these regions are morphologically similar to teeth but may represent gingival papillae misidentified as teeth.
+    Gingival papillae are wedge-shaped soft tissue projections of the gingiva in the interdental spaces. Their morphological features include: being located on the gingival soft tissue, closely attached to actual teeth, appearing triangular; typically positioned in the gaps between two teeth, not forming an independent "crown" outline, and having no occlusal surface.
+    Finally, assign each ID an FDI label based on tooth type; for maxillary models, the left side of the image corresponds to the patient's left side (2*), and the right side corresponds to the patient's right side (1*); for mandibular models, the left side of the image corresponds to the patient's right side (4*), and the right side corresponds to the patient's left side (3*).
     <hint>
-    在为不同ID赋予相同FDI时，请检查这些ID是否分布于**舌侧和唇/颊侧**；若这些ID实际上沿着牙弓方向分布，则他们一般不是同一颗牙齿，请优先调整中切牙的分类，以腾出两侧牙弓的空间。
-    在赋予FDI标签时，请不要考虑是否超出了16颗牙齿的数量限制，如果两个ID有可能属于两颗牙齿，则为他们赋予两个不同的FDI。
+    When assigning the same FDI to different IDs, check whether these IDs are distributed on the **lingual and labial/buccal sides**; if these IDs are actually distributed along the dental arch direction, they are generally not the same tooth. Please prioritize adjusting the central incisor classification to make room on both sides of the arch.
+    When assigning FDI labels, do not consider whether the count exceeds the 16-tooth limit. If two IDs potentially belong to two different teeth, assign them two different FDI labels.
     </hint>
     <formatting>
-    将你的回答总结成一个json返回给我，格式为：{"results": [{"id": <ID>, "fdi": <FDI>, "type": "<incisor/canine/premolar/molar/wisdom/none>", "bad_id": <BOOL>, ...], "jaw": "<upper/lower>"}
-    对于牙齿，它必须拥有一个FDI标签。对于属于相同牙齿的ID，他们的FDI标签必须相同。对于属于不同牙齿的ID，他们的FDI标签不能重复。对于非牙齿（如牙龈乳头），他们的FDI标签必须为-1，且type为none。
-    FDI标签必须与牙齿类型对应，即：[incisor, *1/*2], [canine, *3], [premolar, *4/*5], [molar, *6/*7], [wisdom, *8].
+    Summarize your answer in a JSON format: {"results": [{"id": <ID>, "fdi": <FDI>, "type": "<incisor/canine/premolar/molar/wisdom/none>", "bad_id": <BOOL>, ...], "jaw": "<upper/lower>"}
+    For teeth, each must have an FDI label. IDs belonging to the same tooth must share the same FDI label. IDs belonging to different teeth must not have duplicate FDI labels. For non-teeth (e.g., gingival papillae), the FDI label must be -1 and type must be none.
+    FDI labels must correspond to tooth types: [incisor, *1/*2], [canine, *3], [premolar, *4/*5], [molar, *6/*7], [wisdom, *8].
     </formatting>
     ''',
 
     '''
-    你预测的中切牙 %s 很可能：%s。请重新检查中切牙分配是否合理，并按照格式要求返回最终的分类结果。
+    Your predicted central incisors %s most likely: %s. Please re-examine whether the central incisor assignment is reasonable, and return the final classification result in the required format.
     '''
 ]
 
 PROMPT_NO_CONVERSATION = '''
-    用户给出的图像是同一患者不同视角的完整的牙列图像，分别从偏顶面（左上）、咬合面（右上）、正面（左中）、两侧（右中、左下）五处绘制了可见区域，第一张已用黑色方框标注若干个ID区域，按照牙弓顺序排列，第二张是不带文本标记的相同分割。现在你需要逐一分析每个ID牙齿的形态，他们在牙弓上相对于其他牙齿的位置，以及他们可能对应的牙齿类型。
-    由于分割算法限制，可能会将一颗牙齿分出多个ID区域标记（属于同一颗牙齿的ID需要告诉我），因此在分析牙齿形状时，优先根据你看到的模型上的牙齿、而不是以ID标记为依据，避免将属于一颗牙齿的几个ID分到不同的牙齿上。
-    同理，也可能会将多颗牙齿分割为一个ID区域，你需要将这一区域认定为bad_id，并将其FDI设为none。
-    对于中切牙，他们通常位于牙弓最前端，有较明显的切缘，没有明显的牙尖突起。对于侧切牙，他们通常位于中切牙两侧，有较明显的切缘，没有明显的牙尖突起。对于尖牙，通常只有一处较高的尖牙突起，以及少许不高的突起，且会向唇侧有鼓起的牙冠面；它们通常会与切牙形似，所以你需要尽可能地将像尖牙的牙齿分类为尖牙。对于前磨牙，一般有两处较高突起，且整体大小与前牙相近。对于后磨牙，一般有3处以上的牙尖，较大较圆的牙窝，以及若干不高的突起。后磨牙通常会比前磨牙更大。对于智齿，通常在口扫模型中不会出现，或大部分埋伏在牙龈内；他们与后磨牙具有相似的外形，且判定时，只有单侧后磨牙的数量为3时，第3后磨牙才判定为智齿。
-    对于有较重磨损的牙齿，通常不会有明显的牙尖突起，但整体的大小及外观相对固定。
-    此外，你需要判定是否有非牙齿的区域。通常，这些区域在外形上近似牙齿，但可能将牙龈乳头识别为牙齿。
-    牙龈乳头是牙龈在牙齿相邻间隙的楔形软组织突起，其形态特点是位于牙龈软组织上，与真实的牙齿紧密贴合，呈现三角状；位置通常在两颗牙齿之间的间隙中，不形成独立的“牙冠”轮廓，无咬合面。
-    最后，根据牙齿类型赋予每个ID一个FDI标签；对于上颌模型，画面左侧对应患者的左侧（2*），画面右侧对应患者的右侧（1*）；对于下颌模型，画面左侧对应患者右侧（4*），画面右侧对应患者左侧（3*）。
+    The images provided by the user show the complete dentition of the same patient from different viewing angles, rendered from five visible regions: oblique occlusal view (top-left), occlusal view (top-right), frontal view (middle-left), and two lateral views (middle-right, bottom-left). The first image has several ID regions annotated with black bounding boxes, arranged in dental arch order. The second image shows the same segmentation without text labels. You need to analyze the morphology of each ID tooth one by one, their positions relative to other teeth on the dental arch, and their likely corresponding tooth types.
+    Due to segmentation algorithm limitations, a single tooth may be split into multiple ID regions (IDs belonging to the same tooth need to be reported to me). Therefore, when analyzing tooth shape, prioritize what you see on the model rather than the ID labels, to avoid assigning multiple IDs of the same tooth to different teeth.
+    Similarly, multiple teeth may be segmented as a single ID region; you should mark such regions as bad_id and set their FDI to none.
+    For central incisors, they are usually located at the very front of the dental arch, with a distinct incisal edge and no prominent cusp. For lateral incisors, they are usually located on both sides of the central incisors, with a distinct incisal edge and no prominent cusp. For canines, there is typically one prominent cusp with a few minor ridges, and the crown surface bulges toward the labial side; they often resemble incisors, so you should classify teeth that look like canines as canines whenever possible. For premolars, there are generally two prominent cusps, and their overall size is similar to anterior teeth. For molars, there are generally 3 or more cusps, a large and rounded fossa, and several minor ridges. Molars are usually larger than premolars. For wisdom teeth, they typically do not appear in intraoral scan models, or are mostly impacted within the gingiva; they have a similar shape to molars, and should only be classified as wisdom teeth when there are 3 posterior molars on one side, with the 3rd being the wisdom tooth.
+    For teeth with heavy wear, there are usually no prominent cusps, but the overall size and appearance remain relatively consistent.
+    Additionally, you need to determine whether there are non-tooth regions. Typically, these regions are morphologically similar to teeth but may represent gingival papillae misidentified as teeth.
+    Gingival papillae are wedge-shaped soft tissue projections of the gingiva in the interdental spaces. Their morphological features include: being located on the gingival soft tissue, closely attached to actual teeth, appearing triangular; typically positioned in the gaps between two teeth, not forming an independent "crown" outline, and having no occlusal surface.
+    Finally, assign each ID an FDI label based on tooth type; for maxillary models, the left side of the image corresponds to the patient's left side (2*), and the right side corresponds to the patient's right side (1*); for mandibular models, the left side of the image corresponds to the patient's right side (4*), and the right side corresponds to the patient's left side (3*).
     <hint>
-    在为不同ID赋予相同FDI时，请检查这些ID是否分布于**舌侧和唇/颊侧**；若这些ID实际上沿着牙弓方向分布，则他们一般不是同一颗牙齿，请优先调整中切牙的分类，以腾出两侧牙弓的空间。
-    在赋予FDI标签时，请不要考虑是否超出了16颗牙齿的数量限制，如果两个ID有可能属于两颗牙齿，则为他们赋予两个不同的FDI。
+    When assigning the same FDI to different IDs, check whether these IDs are distributed on the **lingual and labial/buccal sides**; if these IDs are actually distributed along the dental arch direction, they are generally not the same tooth. Please prioritize adjusting the central incisor classification to make room on both sides of the arch.
+    When assigning FDI labels, do not consider whether the count exceeds the 16-tooth limit. If two IDs potentially belong to two different teeth, assign them two different FDI labels.
     </hint>
     <formatting>
-    将你的回答总结成一个json返回给我，格式为：{"results": [{"id": <ID>, "fdi": <FDI>, "type": "<incisor/canine/premolar/molar/wisdom/none>", "bad_id": <BOOL>, ...], "jaw": "<upper/lower>"}
-    对于牙齿，它必须拥有一个FDI标签。对于属于相同牙齿的ID，他们的FDI标签必须相同。对于属于不同牙齿的ID，他们的FDI标签不能重复。对于非牙齿（如牙龈乳头），他们的FDI标签必须为-1，且type为none。
-    FDI标签必须与牙齿类型对应，即：[incisor, *1/*2], [canine, *3], [premolar, *4/*5], [molar, *6/*7], [wisdom, *8].
+    Summarize your answer in a JSON format: {"results": [{"id": <ID>, "fdi": <FDI>, "type": "<incisor/canine/premolar/molar/wisdom/none>", "bad_id": <BOOL>, ...], "jaw": "<upper/lower>"}
+    For teeth, each must have an FDI label. IDs belonging to the same tooth must share the same FDI label. IDs belonging to different teeth must not have duplicate FDI labels. For non-teeth (e.g., gingival papillae), the FDI label must be -1 and type must be none.
+    FDI labels must correspond to tooth types: [incisor, *1/*2], [canine, *3], [premolar, *4/*5], [molar, *6/*7], [wisdom, *8].
     </formatting>
 '''
 
 
 NON_TOOTH_PROMPT_WITHOUT_BBOX = '''
-    用户给出的图像是同一患者不同视角的完整的牙列图像，分别从偏顶面（左上）、咬合面（右上）、正面（左中）、两侧（右中、左下）五处绘制了可见区域，第一张已用黑色方框标注 %d-%d 若干个ID区域，按照牙弓顺序排列，第二张是不带文本标记的相同分割。
-    接下来的任务中，牙齿体积仅用作参考，会因为被牙龈埋伏等原因导致与真实大小差异较大。
-    找出图中牙龈乳头、口腔内壁、软组织等显著的非牙齿区域，以json格式返回他们的ID:{"results": [<id>, ...]}，如果没有，则返回{"results": []}。注意，不要将可能是牙齿的局部mask识别为非牙齿区域。牙龈乳头、口腔内壁等在形态上类似牙齿，而不是大片的区域，请结合图像仔细寻找。
+    The images provided by the user show the complete dentition of the same patient from different viewing angles, rendered from five visible regions: oblique occlusal view (top-left), occlusal view (top-right), frontal view (middle-left), and two lateral views (middle-right, bottom-left). The first image has %d-%d ID regions annotated with black bounding boxes, arranged in dental arch order. The second image shows the same segmentation without text labels.
+    In the following tasks, tooth volume is for reference only, as it may differ significantly from the actual size due to reasons such as gingival impaction.
+    Identify significant non-tooth regions in the images, such as gingival papillae, oral cavity inner walls, and soft tissues. Return their IDs in JSON format: {"results": [<id>, ...]}. If none exist, return {"results": []}. Note: do not identify partial tooth masks as non-tooth regions. Gingival papillae and oral cavity inner walls are morphologically similar to teeth rather than large areas; please carefully examine the images to find them.
 '''
 
 NON_TOOTH_PROMPT = PROMPTS[0]
@@ -368,12 +368,12 @@ def predict_fdi_from_images(vertices, faces, face_labels, renderer, gpt_model=MO
         incisor_error_reason = ''
         try:
             if maybe_incisors is not None and len(maybe_incisors['results']) > 0:
-                # 先检查大小
+                # First check size
                 incisor_vertices = [np.mean(vertices[faces[face_labels == i]], axis=1) for i in maybe_incisors['results']]
                 incisor_sizes = [np.prod(geometry.compute_oriented_bounding_box_size(verts)) for verts in incisor_vertices]
                 if np.min(incisor_sizes) / np.max(incisor_sizes) < 0.5:
                     incisor_error_flag = True
-                    incisor_error_reason += '中切牙尺寸差异过大；'
+                    incisor_error_reason += 'Central incisor size difference is too large; '
 
                 incisor_idx = [int(np.argwhere(exist_id == i).squeeze()) for i in maybe_incisors['results']]
                 if len(incisor_idx) == 2:
@@ -383,7 +383,7 @@ def predict_fdi_from_images(vertices, faces, face_labels, renderer, gpt_model=MO
                 pright = len(exist_id) - np.max(incisor_idx) - 1
                 if abs(pright - pleft) > 1:
                     incisor_error_flag = True
-                    incisor_error_reason += '中切牙不在牙弓中线位置；'
+                    incisor_error_reason += 'Central incisors are not at the midline of the dental arch; '
         except:
             pass
 

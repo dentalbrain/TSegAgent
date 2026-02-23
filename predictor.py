@@ -162,7 +162,7 @@ class Predictor:
         num_vertices = len(vertices)
         vertex_labels = np.zeros(num_vertices, dtype=np.int32)
 
-        # 为每个顶点收集其相邻面的标签（忽略未标注的0）
+        # Collect adjacent face labels for each vertex (ignoring unlabeled 0)
         incident_labels = [[] for _ in range(num_vertices)]
         for face, label in zip(faces, face_labels):
             if label <= 0:
@@ -170,7 +170,7 @@ class Predictor:
             for vid in face:
                 incident_labels[int(vid)].append(int(label))
 
-        # 采用多数表决确定顶点标签；若无有效标签则保持0
+        # Determine vertex label by majority voting; keep 0 if no valid labels
         for vid, labels in enumerate(incident_labels):
             if not labels:
                 continue

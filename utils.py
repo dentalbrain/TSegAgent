@@ -8,7 +8,7 @@ def vertex_labels_to_face_labels(vertex_labels: np.ndarray, mesh: trimesh.Trimes
     mesh: trimesh.Trimesh
     """
     face_labels = vertex_labels[mesh.faces]
-    # 每个face取众数
+    # Take the mode for each face
     face_labels = np.apply_along_axis(lambda x: np.bincount(x).argmax(), axis=1, arr=face_labels)
     return face_labels.astype(int)
 

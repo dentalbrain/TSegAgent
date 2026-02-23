@@ -51,13 +51,13 @@ class AnatomyColors:
 
     def get_tooth_district_color(self, i, norm=False):
         """
-        获取分区牙齿颜色
+        Get tooth color by quadrant.
 
-        1X: 蓝；2X：红；3X：绿；4X：粉
+        1X: blue; 2X: red; 3X: green; 4X: pink
 
-        :param i: FDI标准的牙齿编号
+        :param i: Tooth number in FDI notation
         :type i: int
-        :param norm: 是否归一化[0, 1]
+        :param norm: Whether to normalize to [0, 1]
         :type norm: bool
         :return:
         :rtype:

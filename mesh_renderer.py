@@ -54,18 +54,18 @@ class MeshRenderer:
                           [sz, cz, 0],
                           [0, 0, 1]])
 
-        # 先绕 x，再 y，最后 z，匹配 camera_config 的欧拉角约定
+        # First rotate around x, then y, then z, matching camera_config's Euler angle convention
         return rot_x @ rot_y @ rot_z
 
     @staticmethod
     def _rotation_matrix_to_euler(R):
         """
-        R: 3x3 旋转矩阵 (numpy array)
-        返回: [roll, pitch, yaw]，单位：弧度
-        约定: R = Rz(yaw) * Ry(pitch) * Rx(roll)
+        R: 3x3 rotation matrix (numpy array)
+        Returns: [roll, pitch, yaw] in degrees
+        Convention: R = Rz(yaw) * Ry(pitch) * Rx(roll)
         """
 
-        # sy 用来判断是否接近万向节锁（pitch ~ ±90°）
+        # sy is used to check if we're close to gimbal lock (pitch ~ +/-90 deg)
         sy = np.sqrt(R[0, 0] ** 2 + R[1, 0] ** 2)
         singular = sy < 1e-6
 
@@ -77,7 +77,7 @@ class MeshRenderer:
             # yaw (Z)
             yaw = np.arctan2(R[1, 0], R[0, 0])
         else:
-            # 万向节锁时的处理：yaw 和 roll 纠缠在一起，只能固定其中一个
+            # Gimbal lock handling: yaw and roll are coupled, can only fix one of them
             roll = np.arctan2(-R[1, 2], R[1, 1])
             pitch = np.arctan2(-R[2, 0], sy)
             yaw = 0.0

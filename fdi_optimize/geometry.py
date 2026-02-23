@@ -14,16 +14,16 @@ except Exception:  # pragma: no cover
 
 def parameterize_points_on_xy_plane(points, params=None):
     """
-    散点投影到平面参数化，拟合抛物线参数
+    Project scattered points onto a plane and parameterize them by fitting a parabola.
 
     :param points: [N, 3]
     :type points: np.ndarray
-    :return: [N, 2]，平面投影点集; [N] 距离
+    :return: [N, 2], projected point set on the plane; [N] distances
     :rtype: tuple(np.ndarray, np.ndarray)
     """
     projected_points_2d = points[:, 0:2]
 
-    # 最小二乘法拟合抛物线
+    # Least squares fit for parabola
     def func(params, x):
         a, b, c = params
         return a * x * x + b * x + c
@@ -38,8 +38,8 @@ def parameterize_points_on_xy_plane(points, params=None):
         a, b, c = leastsq(error, init_params, args=(projected_points_2d[:, 0], projected_points_2d[:, 1]))[0]
 
     def point_on_curve(x, y, l=-1, r=1):
-        # 求斜率和切线需要求解三次方程，不利于计算
-        # 因此采用微分方法
+        # Finding slope and tangent requires solving a cubic equation, which is not computationally efficient
+        # Therefore, use a numerical differentiation approach
         splits = 1000
         result_x = l
 
@@ -65,11 +65,11 @@ def parameterize_points_on_xy_plane(points, params=None):
 
 def compute_oriented_bounding_box_size(points):
     """
-    计算点集的定向包围盒尺寸
+    Compute the oriented bounding box size of a point set.
 
     :param points: [N, 3]
     :type points: np.ndarray
-    :return: [3]，xyz方向尺寸
+    :return: [3], size in xyz directions
     :rtype: np.ndarray
     """
     from sklearn.decomposition import PCA

@@ -21,7 +21,7 @@ def visualize_vertex_labels_bounds(
 ):
     mesh = trimesh.Trimesh(vertices=vertices, faces=faces, process=False)
 
-    # 1) 先给所有面上原本的 label 颜色
+    # 1) First assign original label colors to all faces
     if is_fdi:
         face_colors = ac.get_arr_tooth_color(face_labels)
     else:
@@ -29,29 +29,29 @@ def visualize_vertex_labels_bounds(
 
     face_colors = np.asarray(face_colors)
 
-    # 2) 找面邻接关系：每行是一对相邻面 (f0, f1)，共享一条边
+    # 2) Find face adjacency: each row is a pair of adjacent faces (f0, f1) sharing an edge
     #    shape: (K, 2)
     adj = mesh.face_adjacency
     if adj is None or len(adj) == 0:
-        # 没有邻接就直接返回（例如只有一个面）
+        # No adjacency, return directly (e.g., only one face)
         mesh.visual.face_colors = face_colors
         return mesh
 
     f0 = adj[:, 0]
     f1 = adj[:, 1]
 
-    # 3) 边界面：任一相邻面标签不同
+    # 3) Boundary faces: any adjacent faces with different labels
     diff = face_labels[f0] != face_labels[f1]
     boundary_faces = np.unique(np.concatenate([f0[diff], f1[diff]], axis=0))
 
     boundary_rgba = np.array([0x33, 0x33, 0x33, 0xFF], dtype=np.uint8)
 
-    # 兼容 face_colors 可能是 RGB 或 RGBA
+    # Compatible with face_colors being either RGB or RGBA
     if face_colors.ndim != 2 or face_colors.shape[0] != faces.shape[0]:
-        raise ValueError("face_colors 必须是 (num_faces, 3) 或 (num_faces, 4)")
+        raise ValueError("face_colors must be (num_faces, 3) or (num_faces, 4)")
 
     if face_colors.shape[1] == 3:
-        # 补 alpha
+        # Add alpha channel
         alpha = np.full((face_colors.shape[0], 1), 0xFF, dtype=face_colors.dtype)
         face_colors = np.concatenate([face_colors, alpha], axis=1)
 

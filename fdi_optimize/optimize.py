@@ -3,7 +3,7 @@ from __future__ import annotations
 import numpy as np
 from typing import Any, Dict, List, Optional, Set, Tuple
 
-# 兼容包内/脚本运行
+# Compatible with both package import and script execution
 try:  # pragma: no cover
     from . import geometry
 except ImportError:  # pragma: no cover
@@ -58,21 +58,21 @@ def optimize(
 
     # -------- input checks --------
     if vertices is None or faces is None or face_ids is None:
-        raise ValueError("vertices/faces/face_ids 不能为空")
+        raise ValueError("vertices/faces/face_ids must not be empty")
     vertices = np.asarray(vertices)
     faces = np.asarray(faces)
     face_ids = np.asarray(face_ids)
     if vertices.ndim != 2 or vertices.shape[1] != 3:
-        raise ValueError(f"vertices 形状应为 [N,3]，但得到 {vertices.shape}")
+        raise ValueError(f"vertices shape should be [N,3], but got {vertices.shape}")
     if faces.ndim != 2 or faces.shape[1] != 3:
-        raise ValueError(f"faces 形状应为 [M,3]，但得到 {faces.shape}")
+        raise ValueError(f"faces shape should be [M,3], but got {faces.shape}")
     if face_ids.ndim != 1 or face_ids.shape[0] != faces.shape[0]:
-        raise ValueError(f"face_ids 形状应为 [M] 且 M=faces.shape[0]，但得到 {face_ids.shape}")
+        raise ValueError(f"face_ids shape should be [M] with M=faces.shape[0], but got {face_ids.shape}")
 
     if gpt_output is None:
         gpt_output = []
 
-    # -------- 回填到面 --------
+    # -------- assign labels back to faces --------
     final_labels = np.zeros_like(face_ids, dtype=np.int32)
     for item in gpt_output:
         tid = item["id"]

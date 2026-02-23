@@ -33,12 +33,12 @@ def _remove_large_predictions(masks: np.ndarray, boxes: np.ndarray, scores: np.n
 
 def _voxelize_prediction(pred, origin, vox_size=0.5):
     """
-    pred: (N,3) 点云
-    origin: (3,) 体素网格原点（A/B 必须一致）
+    pred: (N,3) point cloud
+    origin: (3,) voxel grid origin (must be consistent between A/B)
     vox_size: float
 
-    return: (K,) 一维“体素 token”（结构化 dtype），每个 token 表示一个唯一体素
-            可直接用于 np.intersect1d / np.union1d（assume_unique=True 更快）
+    return: (K,) 1D "voxel tokens" (structured dtype), each token represents a unique voxel
+            Can be used directly with np.intersect1d / np.union1d (assume_unique=True is faster)
     """
     pred = np.asarray(pred, dtype=np.float64)
     origin = np.asarray(origin, dtype=np.float64).reshape(3)
@@ -51,23 +51,23 @@ def _voxelize_prediction(pred, origin, vox_size=0.5):
         raise ValueError("vox_size must be > 0")
 
     v = np.floor((pred - origin) / vox_size).astype(np.int64)      # (N,3)
-    v = np.unique(v, axis=0)                                       # (K,3) 去重占据体素
+    v = np.unique(v, axis=0)                                       # (K,3) deduplicated occupied voxels
 
-    # 变成结构化数组，每行一个 token
+    # Convert to structured array, one token per row
     tokens = np.ascontiguousarray(v).view(
         np.dtype([("x", np.int64), ("y", np.int64), ("z", np.int64)])
     ).reshape(-1)
 
-    # 已唯一且排序（np.unique 的结果），后面 intersect1d 可以 assume_unique=True
+    # Already unique and sorted (result of np.unique), so intersect1d can use assume_unique=True
     return tokens
 
 
 def _calc_mutual_iou(pred_a, pred_b, origin=None, vox_size=0.005, origin_mode="global_min"):
     """
-    pred_a/pred_b: 点云 (Na,3)/(Nb,3)
+    pred_a/pred_b: point clouds (Na,3)/(Nb,3)
 
-    返回:
-      ioa = |Va ∩ Vb| / |Va|   (Va = a 的占据体素集合)
+    Returns:
+      ioa = |Va ∩ Vb| / |Va|   (Va = occupied voxel set of a)
       iob = |Va ∩ Vb| / |Vb|
     """
     pred_a = np.asarray(pred_a, dtype=np.float64)
@@ -131,7 +131,7 @@ def _merge_predictions(vertices: np.ndarray, faces: np.ndarray, id_maps: np.ndar
         face_visits[rendered_face_ids] += 1
         face_positives_part = np.zeros(len(faces), dtype=np.int8)
 
-        ######### 合并重叠度大于merge_threshold的mask #########
+        ######### Merge masks with overlap greater than merge_threshold #########
         for mask_i in range(len(masks)):
             mask = masks[mask_i][0]
             positive_face_ids = np.unique(id_map[mask] - 1)
@@ -146,61 +146,61 @@ def _merge_predictions(vertices: np.ndarray, faces: np.ndarray, id_maps: np.ndar
                 ioa, iob = _calc_mutual_iou(positive_face_centers, face_centers[merged_masks[merged_i]])
                 # print(f'IOU[{mask_i}, {merged_i}] ioa={ioa:.4f}, iob={iob:.4f}')
                 if ioa > merge_threshold and iob > merge_threshold:
-                    # 若mask与merged_i重叠度大于merge_threshold，则合并入merged_mask
+                    # If mask overlap with merged_i exceeds merge_threshold, merge into merged_mask
                     merged_masks[merged_i] = np.union1d(merged_masks[merged_i], positive_face_ids)
                     merged_mask_prob_list[merged_i].append(scores[mask_i])
                     is_merged = True
-                    # print(f'合并 i={i} mask_i={mask_i} , merged_i={merged_i}')
+                    # print(f'Merged i={i} mask_i={mask_i} , merged_i={merged_i}')
                     break
                 if i in [9, 10, 11, 12, 13, 14, 15]:
                     if ioa > merge_threshold or iob > merge_threshold:
-                        # 若mask与merged_i重叠度大于merge_threshold，则合并入merged_mask
+                        # If mask overlap with merged_i exceeds merge_threshold, merge into merged_mask
                         merged_masks[merged_i] = np.union1d(merged_masks[merged_i], positive_face_ids)
                         merged_mask_prob_list[merged_i].append(scores[mask_i])
                         is_merged = True
-                        # print(f'合并 i={i} mask_i={mask_i} , merged_i={merged_i}')
+                        # print(f'Merged i={i} mask_i={mask_i} , merged_i={merged_i}')
                         break
 
             if not is_merged:
-                # 是一个新的实例mask
+                # This is a new instance mask
                 merged_masks.append(positive_face_ids)
                 merged_mask_prob_list.append([scores[mask_i]])
-                # print(f'新实例 i={i} mask_i={mask_i}, merged_i={len(merged_masks) - 1}')
+                # print(f'New instance i={i} mask_i={mask_i}, merged_i={len(merged_masks) - 1}')
         face_positives += face_positives_part
 
-    ######### 合并概率值 #########
+    ######### Merge probability values #########
     for merged_i in range(len(merged_masks)):
-        merged_mask_prob_list[merged_i] = np.mean(merged_mask_prob_list[merged_i])  # 可以改成sum看看效果
+        merged_mask_prob_list[merged_i] = np.mean(merged_mask_prob_list[merged_i])  # Could try sum to see the effect
         np.savetxt(f'tmp/fmask/{merged_i}.xyz', face_centers[merged_masks[merged_i]])
 
-    ######### 寻找存在包含关系的merged_mask，根据score判断他们是否属于同一实例 #########
+    ######### Find merged_masks with containment relations, determine if they belong to the same instance based on score #########
     reduced_count = np.zeros(len(merged_masks), dtype=np.int32)
     for merged_i in range(len(merged_masks) - 1):
         for merged_j in range(merged_i + 1, len(merged_masks)):
             if len(merged_masks[merged_i]) == 0 or len(merged_masks[merged_j]) == 0:
                 continue
             ioa, iob = _calc_mutual_iou(face_centers[merged_masks[merged_i]], face_centers[merged_masks[merged_j]])
-            # 若有大幅重叠，判断实例更倾向于属于小的还是大的区域
+            # If there is significant overlap, determine whether the instance belongs to the smaller or larger region
             if ioa > merge_threshold + 0.15:
-                # merged_i是小的区域
+                # merged_i is the smaller region
                 small_i, large_i = merged_i, merged_j
             elif iob > merge_threshold + 0.15:
-                # merged_j是小的区域
+                # merged_j is the smaller region
                 small_i, large_i = merged_j, merged_i
             else:
                 continue
             sc_small, sc_large = merged_mask_prob_list[small_i], merged_mask_prob_list[large_i]
             if sc_small > sc_large:
-                # 倾向于小区域，则从大区域中减去
+                # Prefer the smaller region, subtract from the larger region
                 reduced = np.setdiff1d(merged_masks[large_i], merged_masks[small_i])
                 reduced_count[large_i] += (len(merged_masks[large_i]) - len(reduced))
                 merged_masks[large_i] = reduced
             else:
-                # 倾向于大区域，合并到大区域中，并清空小区域的mask
+                # Prefer the larger region, merge into the larger region and clear the smaller mask
                 merged_masks[large_i] = np.union1d(merged_masks[large_i], merged_masks[small_i])
                 merged_masks[small_i] = np.zeros(0)
 
-    ######### 写回labels #########
+    ######### Write back labels #########
     print(reduced_count.tolist())
     print([len(x) for x in merged_masks])
     face_id = 1
@@ -387,7 +387,7 @@ def postprocess(predictions: dict, reorder_face: bool = True):
     )
 
     if reorder_face:
-        # 对face_labels重排序
+        # Reorder face_labels
         _c = np.mean(vertices, 0)
         _m = np.sqrt(np.max(np.sum((vertices - _c) ** 2, -1)))
         vertices_norm = (vertices - _c) / _m
