@@ -104,120 +104,8 @@ def _calc_mutual_iou(pred_a, pred_b, origin=None, vox_size=0.005, origin_mode="g
     iob = inter / ub if ub > 0 else 0.0
     return float(ioa), float(iob)
 
-def _merge_predictions(vertices: np.ndarray, faces: np.ndarray, id_maps: np.ndarray, predicts: dict, merge_threshold: float = 0.7, face_visit_threshold: float = 0.33):
-    face_labels = np.zeros(len(faces), dtype=np.int32)
-    face_positives = np.zeros(len(faces), dtype=np.int32)
-    face_visits = np.zeros(len(faces), dtype=np.float32)
 
-    merged_masks = []
-    merged_mask_prob_list = []
-
-    face_centers = vertices[faces].mean(axis=1)
-
-    for i in range(len(predicts)):  # for each predicted image view
-
-        if i in [9, 10, 14]:
-            continue
-        id_map = id_maps[i] # [H, W] np.int64, 1-based face id
-        boxes = predicts[i]['boxes']    # [num_parts, 4] np.float32
-        masks = predicts[i]['masks']    # [num_parts, 1, H, W] np.bool
-        scores = predicts[i]['scores']  # [num_parts] np.float32
-        if len(boxes) == 0:
-            continue
-        boxes, masks, scores = _remove_large_predictions(masks, boxes, scores, id_map)
-
-        rendered_face_ids = np.unique(id_map - 1)
-        rendered_face_ids = rendered_face_ids[rendered_face_ids >= 0]
-        face_visits[rendered_face_ids] += 1
-        face_positives_part = np.zeros(len(faces), dtype=np.int8)
-
-        ######### Merge masks with overlap greater than merge_threshold #########
-        for mask_i in range(len(masks)):
-            mask = masks[mask_i][0]
-            positive_face_ids = np.unique(id_map[mask] - 1)
-            positive_face_ids = positive_face_ids[positive_face_ids >= 0]
-
-            face_positives_part[positive_face_ids] = 1
-
-            positive_face_centers = face_centers[positive_face_ids]
-
-            is_merged = False
-            for merged_i in range(len(merged_masks)):
-                ioa, iob = _calc_mutual_iou(positive_face_centers, face_centers[merged_masks[merged_i]])
-                # print(f'IOU[{mask_i}, {merged_i}] ioa={ioa:.4f}, iob={iob:.4f}')
-                if ioa > merge_threshold and iob > merge_threshold:
-                    # If mask overlap with merged_i exceeds merge_threshold, merge into merged_mask
-                    merged_masks[merged_i] = np.union1d(merged_masks[merged_i], positive_face_ids)
-                    merged_mask_prob_list[merged_i].append(scores[mask_i])
-                    is_merged = True
-                    # print(f'Merged i={i} mask_i={mask_i} , merged_i={merged_i}')
-                    break
-                if i in [9, 10, 11, 12, 13, 14, 15]:
-                    if ioa > merge_threshold or iob > merge_threshold:
-                        # If mask overlap with merged_i exceeds merge_threshold, merge into merged_mask
-                        merged_masks[merged_i] = np.union1d(merged_masks[merged_i], positive_face_ids)
-                        merged_mask_prob_list[merged_i].append(scores[mask_i])
-                        is_merged = True
-                        # print(f'Merged i={i} mask_i={mask_i} , merged_i={merged_i}')
-                        break
-
-            if not is_merged:
-                # This is a new instance mask
-                merged_masks.append(positive_face_ids)
-                merged_mask_prob_list.append([scores[mask_i]])
-                # print(f'New instance i={i} mask_i={mask_i}, merged_i={len(merged_masks) - 1}')
-        face_positives += face_positives_part
-
-    ######### Merge probability values #########
-    for merged_i in range(len(merged_masks)):
-        merged_mask_prob_list[merged_i] = np.mean(merged_mask_prob_list[merged_i])  # Could try sum to see the effect
-        np.savetxt(f'tmp/fmask/{merged_i}.xyz', face_centers[merged_masks[merged_i]])
-
-    ######### Find merged_masks with containment relations, determine if they belong to the same instance based on score #########
-    reduced_count = np.zeros(len(merged_masks), dtype=np.int32)
-    for merged_i in range(len(merged_masks) - 1):
-        for merged_j in range(merged_i + 1, len(merged_masks)):
-            if len(merged_masks[merged_i]) == 0 or len(merged_masks[merged_j]) == 0:
-                continue
-            ioa, iob = _calc_mutual_iou(face_centers[merged_masks[merged_i]], face_centers[merged_masks[merged_j]])
-            # If there is significant overlap, determine whether the instance belongs to the smaller or larger region
-            if ioa > merge_threshold + 0.15:
-                # merged_i is the smaller region
-                small_i, large_i = merged_i, merged_j
-            elif iob > merge_threshold + 0.15:
-                # merged_j is the smaller region
-                small_i, large_i = merged_j, merged_i
-            else:
-                continue
-            sc_small, sc_large = merged_mask_prob_list[small_i], merged_mask_prob_list[large_i]
-            if sc_small > sc_large:
-                # Prefer the smaller region, subtract from the larger region
-                reduced = np.setdiff1d(merged_masks[large_i], merged_masks[small_i])
-                reduced_count[large_i] += (len(merged_masks[large_i]) - len(reduced))
-                merged_masks[large_i] = reduced
-            else:
-                # Prefer the larger region, merge into the larger region and clear the smaller mask
-                merged_masks[large_i] = np.union1d(merged_masks[large_i], merged_masks[small_i])
-                merged_masks[small_i] = np.zeros(0)
-
-    ######### Write back labels #########
-    print(reduced_count.tolist())
-    print([len(x) for x in merged_masks])
-    face_id = 1
-    for merged_i in range(len(merged_masks)):
-        if len(merged_masks[merged_i]) > 0:
-            print(reduced_count[merged_i] / (reduced_count[merged_i] + len(merged_masks[merged_i])))
-            if reduced_count[merged_i] / (reduced_count[merged_i] + len(merged_masks[merged_i])) > 0.5:
-                continue
-            face_labels[merged_masks[merged_i]] = face_id
-            face_id += 1
-
-    face_labels[np.argwhere(face_positives / (face_visits + 1e-3) < face_visit_threshold)] = 0
-
-    return face_labels
-
-
-def _merge_predictions_v1(faces: np.ndarray, id_maps: np.ndarray, predicts: dict, merge_threshold: float = 0.4, face_visit_threshold: float = 0.33):
+def _merge_predictions(faces: np.ndarray, id_maps: np.ndarray, predicts: dict, merge_threshold: float = 0.4, face_visit_threshold: float = 0.33):
     face_labels = np.zeros(len(faces), dtype=np.int32)
     face_positives = np.zeros(len(faces), dtype=np.int32)
     face_visits = np.zeros(len(faces), dtype=np.float32)
@@ -376,7 +264,7 @@ def postprocess(predictions: dict, reorder_face: bool = True):
     vertices = predictions["vertices"]
     faces = predictions["faces"]
 
-    face_labels = _merge_predictions_v1(faces, id_maps, predicts)
+    face_labels = _merge_predictions(faces, id_maps, predicts)
     face_labels = _remove_disconnected_parts(faces, face_labels, vertices, cc_ratio_threshold=0.1)
     face_labels = _fill_small_gaps(
         faces,
@@ -409,80 +297,6 @@ def postprocess(predictions: dict, reorder_face: bool = True):
         for i, order in enumerate(order_idx):
             face_labels_reorder[face_labels == face_labels_uniq[order]] = i + 1
         face_labels = face_labels_reorder
-    return vertices, faces, face_labels
-
-
-def _merge_predictions_coarse(faces: np.ndarray, id_maps: np.ndarray, predicts: dict):
-    face_labels = np.zeros(len(faces), dtype=np.int32)
-    id_cnt = 1
-
-    for i in range(len(predicts)):
-        id_map = id_maps[i] # [H, W] np.int64, 1-based face id
-        boxes = predicts[i]['boxes']    # [num_parts, 4] np.float32
-        masks = predicts[i]['masks']    # [num_parts, 1, H, W] np.bool
-        scores = predicts[i]['scores']  # [num_parts] np.float32
-        boxes, masks, scores = _remove_large_predictions(masks, boxes, scores, id_map)
-
-        for part in range(len(masks)):
-            mask = masks[part][0]
-            # positive_face_ids = np.unique(id_map[mask] - 1)
-            positive_face_ids = np.unique(id_map[mask] - 1)
-            positive_face_ids = positive_face_ids[positive_face_ids >= 0]
-
-            current_masked = face_labels[positive_face_ids]
-            current_masked_gt_0 = current_masked[current_masked > 0]
-            current_masked_unique, current_masked_unique_cnt = np.unique(current_masked_gt_0, return_counts=True)
-            zero_face_ids = positive_face_ids[current_masked == 0]
-
-            face_labels[zero_face_ids] = id_cnt
-            id_cnt += 1
-
-            for masked in current_masked_unique:
-                face_labels[current_masked[current_masked == masked]] = id_cnt
-                id_cnt += 1
-
-    return face_labels
-
-
-def postprocess_coarse(predictions: dict, reorder_face: bool = True):
-    id_maps = predictions["id_maps"]
-    predicts = predictions["predicts"]
-    vertices = predictions["vertices"]
-    faces = predictions["faces"]
-
-    face_labels = _merge_predictions_coarse(faces, id_maps, predicts)
-    face_labels = _remove_disconnected_parts(faces, face_labels, vertices, cc_ratio_threshold=0.1)
-    face_labels = _fill_small_gaps(
-        faces,
-        face_labels,
-        vertices,
-        gap_size_threshold=max(10, int(len(faces) * 0.002)),
-        majority_ratio=0.6,
-    )
-
-    if reorder_face:
-        _c = np.mean(vertices, 0)
-        _m = np.sqrt(np.max(np.sum((vertices - _c) ** 2, -1)))
-        vertices_norm = (vertices - _c) / _m
-
-        # reorder face labels
-        face_labels_uniq = np.unique(face_labels)
-        face_labels_uniq = face_labels_uniq[face_labels_uniq > 0]
-
-        centroids = []
-        for tid in face_labels_uniq:
-            centroids.append(np.mean(np.mean(vertices_norm[faces[face_labels == tid]], axis=0), axis=0))
-        centroids = np.array(centroids)
-
-        curve_param = geometry.parameterize_points_on_xy_plane(centroids)[0]
-        curve_param = np.asarray(curve_param, dtype=float)
-
-        order_idx = np.argsort(curve_param)
-        face_labels_reorder = np.zeros_like(face_labels)
-        for i, order in enumerate(order_idx):
-            face_labels_reorder[face_labels == face_labels_uniq[order]] = i + 1
-        face_labels = face_labels_reorder
-
     return vertices, faces, face_labels
 
 

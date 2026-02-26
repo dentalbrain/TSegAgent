@@ -96,7 +96,10 @@ class Predictor:
             [30, -30, 180],
             [-90, 0, 0],
             [-80, 0, 0],
-            [-70, 0, 0]
+            [-70, 0, 0],
+            [100, 180, 0],
+            [120, 180, 30],
+            [120, 180, -30]
         ]
         for R in selected_frames:
             renderer.set_rotation(R)
@@ -140,7 +143,7 @@ class Predictor:
     def _generate_fdi_predict_images(self, renderer):
         vertices, faces, face_labels = self.output["vertices"], self.output["faces"], self.output["face_labels"]
         self.output["face_id"] = face_labels
-        face_labels_fdi, gpt_output = predict_fdi_from_images(vertices, faces, face_labels, renderer, is_lower=self.current_model_path.__contains__('_lower'), gpt_model=self.gpt_model)
+        face_labels_fdi, gpt_output = predict_fdi_from_images(vertices, faces, face_labels, renderer, gpt_model=self.gpt_model)
         self.output["face_labels"] = face_labels_fdi
         self.output["gpt_output"] = gpt_output
 

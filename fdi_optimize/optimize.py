@@ -16,8 +16,7 @@ def optimize(
     vertices: np.ndarray,
     faces: np.ndarray,
     face_ids: np.ndarray,
-    gpt_output: Optional[List[Dict]] = None,
-    is_lower: bool = False,
+    gpt_output: Optional[List[Dict]] = None
 ) -> np.ndarray:
 
     # -------- helpers --------
