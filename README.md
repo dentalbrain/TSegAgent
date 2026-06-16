@@ -1,4 +1,6 @@
 # TSegAgent: Zero-Shot Tooth Segmentation via Geometry-Aware Vision-Language Agents
+
+This is the official implementation of MICCAI 2026 paper "TSegAgent: Zero-Shot Tooth Segmentation via Geometry-Aware Vision-Language Agents".
 ---
 
 ## Installation
@@ -39,9 +41,6 @@ pip install -e .
 #### 4. Install `reversible_rasterizer`
 
 This repository is for mesh rendering and pixel-face relation building.
-
-> Note that the repository is **fully-anonymized** during peer review. One of the dependencies `reversible_rasterizer` should have been added by git-submodule, but this will break the double-blind rules. You need to clone each repository in `reversible_rasterizer/dep` according to `reversible_rasterizer/.gitmodules` file.
-> The `reversible_rasterizer` repository link will be make publicly accessible upon paper acceptance.
 
 ```shell
 cd dep/reversible_rasterizer
