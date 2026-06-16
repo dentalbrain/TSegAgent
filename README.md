@@ -1,6 +1,8 @@
 # TSegAgent: Zero-Shot Tooth Segmentation via Geometry-Aware Vision-Language Agents
 
+
 This is the official implementation of MICCAI 2026 paper "TSegAgent: Zero-Shot Tooth Segmentation via Geometry-Aware Vision-Language Agents".
+
 ---
 
 ## Installation
