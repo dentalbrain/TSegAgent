@@ -28,7 +28,7 @@ sam3_root = os.path.join(os.path.dirname(sam3.__file__))
 torch.inference_mode().__enter__()
 
 class Predictor:
-    def __init__(self, cache_path='./download', use_gpt=True, gpt_model=MODELS['chatgpt-5']):
+    def __init__(self, cache_path='./download', use_gpt=True, gpt_model=MODELS['chatgpt-5'], confidence_threshold=0.5):
         self.cache_path = cache_path
         self.use_gpt = use_gpt
         self.gpt_model = gpt_model
@@ -39,7 +39,7 @@ class Predictor:
         # Load the model
         bpe_path = f"{sam3_root}/assets/bpe_simple_vocab_16e6.txt.gz"
         self.sam_model = build_sam3_image_model(bpe_path=bpe_path)
-        self.processor = Sam3Processor(self.sam_model, confidence_threshold=0.5)
+        self.processor = Sam3Processor(self.sam_model, confidence_threshold=confidence_threshold)
 
         self.output = None
         self.debug_output = {}
@@ -49,7 +49,7 @@ class Predictor:
 
         logger.info(f"SAM3 model loaded from {self.cache_path}")
 
-    def predict(self, model_path, text_prompt='tooth'):
+    def predict(self, model_path, text_prompt='tooth', extra_frames=None):
         self.current_model_path = model_path
         # init
         self.output = None
@@ -101,6 +101,8 @@ class Predictor:
             [120, 180, 30],
             [120, 180, -30]
         ]
+        if extra_frames:
+            selected_frames = selected_frames + list(extra_frames)
         for R in selected_frames:
             renderer.set_rotation(R)
 

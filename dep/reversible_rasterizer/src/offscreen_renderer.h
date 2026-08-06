@@ -6,6 +6,22 @@
 
 #ifdef USE_OFFSCREEN_RENDERER
 #include "glspec.h"
+// glspec.h imports X11 macros whose names collide with Eigen identifiers.
+#ifdef Success
+#undef Success
+#endif
+#ifdef Status
+#undef Status
+#endif
+#ifdef None
+#undef None
+#endif
+#ifdef Bool
+#undef Bool
+#endif
+#ifdef Complex
+#undef Complex
+#endif
 #include <vector>
 #include "config.h"
 #include "mesh.hpp"

@@ -6,7 +6,8 @@
 #include <assimp/scene.h>
 #include <assimp/DefaultLogger.hpp>
 #include <assimp/LogStream.hpp>
-#include <stdfloat>
+// This target is C++17 and does not use the C++23 fixed-width float types.
+// GCC 10 therefore cannot provide <stdfloat>, and including it is unnecessary.
 
 class ModelLoader {
 public:
