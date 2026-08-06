@@ -226,7 +226,15 @@ def predict_fdi_from_images(vertices, faces, face_labels, renderer, gpt_model=MO
     
     gpt_output = {
         "output_text": '',
-        "output": []
+        "output": [],
+        "usage": {
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "total_tokens": 0,
+            "cached_input_tokens": 0,
+            "reasoning_tokens": 0,
+            "requests": []
+        }
     }
 
     def request_once(request_id, file_ids, prompt):
@@ -299,6 +307,30 @@ def predict_fdi_from_images(vertices, faces, face_labels, renderer, gpt_model=MO
                 )
         else:
             raise ValueError(f"Unknown gpt model: {gpt_model}")
+
+        usage = getattr(response, "usage", None)
+        if usage is not None:
+            input_tokens = int(getattr(usage, "input_tokens", 0) or 0)
+            output_tokens = int(getattr(usage, "output_tokens", 0) or 0)
+            total_tokens = int(getattr(usage, "total_tokens", 0) or 0)
+            input_details = getattr(usage, "input_tokens_details", None)
+            output_details = getattr(usage, "output_tokens_details", None)
+            cached_tokens = int(getattr(input_details, "cached_tokens", 0) or 0)
+            reasoning_tokens = int(getattr(output_details, "reasoning_tokens", 0) or 0)
+            totals = gpt_output["usage"]
+            totals["input_tokens"] += input_tokens
+            totals["output_tokens"] += output_tokens
+            totals["total_tokens"] += total_tokens
+            totals["cached_input_tokens"] += cached_tokens
+            totals["reasoning_tokens"] += reasoning_tokens
+            totals["requests"].append({
+                "input_tokens": input_tokens,
+                "output_tokens": output_tokens,
+                "total_tokens": total_tokens,
+                "cached_input_tokens": cached_tokens,
+                "reasoning_tokens": reasoning_tokens,
+                "service_tier": getattr(response, "service_tier", None),
+            })
 
         gpt_output['output_text'] = response.output_text
 
@@ -409,5 +441,3 @@ def predict_fdi_from_images(vertices, faces, face_labels, renderer, gpt_model=MO
     face_labels_fdi = gpt_json_result_postprocess(vertices, faces, result_json, face_labels)
     face_labels_fdi[face_labels_fdi < 0] = 0
     return face_labels_fdi, gpt_output
-
-
