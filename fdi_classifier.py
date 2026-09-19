@@ -100,6 +100,68 @@ MODELS = {
     "chatgpt-5": "gpt-5.2"
 }
 
+# Flex processing may legitimately be refused (HTTP 429 "Resource Unavailable",
+# not charged) or time out. Retry the flex request on this schedule and then
+# raise FlexUnavailableError; never silently switch service_tier.
+FLEX_RETRY_BACKOFF_SECONDS = (20, 60, 120)
+FLEX_UNAVAILABLE_MARKERS = ("resource_unavailable", "resource unavailable")
+
+
+class FlexUnavailableError(RuntimeError):
+    """Flex service tier could not serve the request after the retry schedule."""
+
+    def __init__(self, message, last_error=None):
+        super().__init__(message)
+        self.last_error = last_error
+
+
+def is_flex_unavailable_error(error):
+    """True for a flex capacity refusal (429 resource unavailable) or a timeout.
+
+    Matched defensively by class name, status_code and message so the module
+    does not depend on a specific openai SDK version.
+    """
+    class_names = {cls.__name__ for cls in type(error).__mro__}
+    if "APITimeoutError" in class_names or "TimeoutError" in class_names:
+        return True
+    status_code = getattr(error, "status_code", None)
+    if status_code != 429 and "RateLimitError" not in class_names:
+        return False
+    parts = [str(getattr(error, "message", "") or ""), str(error), str(getattr(error, "code", "") or "")]
+    body = getattr(error, "body", None)
+    if body is not None:
+        try:
+            parts.append(json.dumps(body))
+        except (TypeError, ValueError):
+            parts.append(str(body))
+    text = " ".join(parts).lower()
+    return any(marker in text for marker in FLEX_UNAVAILABLE_MARKERS)
+
+
+def create_flex_response(**create_kwargs):
+    """Call client.responses.create with service_tier='flex', retrying only flex-unavailable errors."""
+    last_error = None
+    for attempt in range(len(FLEX_RETRY_BACKOFF_SECONDS) + 1):
+        try:
+            return client.responses.create(service_tier='flex', **create_kwargs)
+        except Exception as error:
+            if not is_flex_unavailable_error(error):
+                raise
+            last_error = error
+            if attempt >= len(FLEX_RETRY_BACKOFF_SECONDS):
+                break
+            delay = FLEX_RETRY_BACKOFF_SECONDS[attempt]
+            logger.warning(
+                "flex tier unavailable (attempt {}/{}): {}; retrying in {}s",
+                attempt + 1, len(FLEX_RETRY_BACKOFF_SECONDS) + 1, error, delay,
+            )
+            time.sleep(delay)
+    raise FlexUnavailableError(
+        "flex service tier unavailable after {} attempts: {}".format(
+            len(FLEX_RETRY_BACKOFF_SECONDS) + 1, last_error),
+        last_error,
+    ) from last_error
+
 
 def init_llm_client(gpt_model=MODELS["doubao-seed"]):
     global client, current_inst
@@ -273,38 +335,19 @@ def predict_fdi_from_images(vertices, faces, face_labels, renderer, gpt_model=MO
                 }
             )
         elif gpt_model == MODELS["chatgpt-5"]:
-            service_tier = 'flex'
-            try:
-                response = client.responses.create(
-                    model=gpt_model,
-                    previous_response_id=request_id,
-                    input=[
-                        {
-                            "role": "user",
-                            "content": request_image_contents + [
-                                {"type": "input_text", "text": prompt},
-                            ],
-                        }
-                    ],
-                    reasoning={"effort": "medium", "summary": "auto"},
-                    service_tier=service_tier
-                )
-            except:
-                service_tier = 'auto'
-                response = client.responses.create(
-                    model=gpt_model,
-                    previous_response_id=request_id,
-                    input=[
-                        {
-                            "role": "user",
-                            "content": request_image_contents + [
-                                {"type": "input_text", "text": prompt},
-                            ],
-                        }
-                    ],
-                    reasoning={"effort": "medium", "summary": "auto"},
-                    service_tier=service_tier
-                )
+            response = create_flex_response(
+                model=gpt_model,
+                previous_response_id=request_id,
+                input=[
+                    {
+                        "role": "user",
+                        "content": request_image_contents + [
+                            {"type": "input_text", "text": prompt},
+                        ],
+                    }
+                ],
+                reasoning={"effort": "medium", "summary": "auto"},
+            )
         else:
             raise ValueError(f"Unknown gpt model: {gpt_model}")
 
