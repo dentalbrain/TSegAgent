@@ -15,7 +15,7 @@ from sam3.model.sam3_image_processor import Sam3Processor
 from sam3.visualization_utils import draw_box_on_image, normalize_bbox, plot_results
 
 import postprocess
-from fdi_classifier import predict_fdi_from_images, MODELS
+from fdi_classifier import generate_fdi_image, predict_fdi_from_images, MODELS
 from mesh_renderer import MeshRenderer
 from utils import model_curvature
 from visualize.visualize import visualize_face_labels
@@ -211,7 +211,13 @@ class Predictor:
     def _generate_fdi_predict_images(self, renderer):
         vertices, faces, face_labels = self.output["vertices"], self.output["faces"], self.output["face_labels"]
         self.output["face_id"] = face_labels
-        face_labels_fdi, gpt_output = predict_fdi_from_images(vertices, faces, face_labels, renderer, gpt_model=self.gpt_model)
+        # Render the two VLM images here and keep them on the output, so a caller can cache
+        # the SAM3 stage (instances + images) and re-run only the VLM stage for another model.
+        images = list(generate_fdi_image(vertices, faces, face_labels, renderer))
+        self.output["fdi_images"] = images
+        face_labels_fdi, gpt_output = predict_fdi_from_images(
+            vertices, faces, face_labels, renderer, gpt_model=self.gpt_model, images=images,
+        )
         self.output["face_labels"] = face_labels_fdi
         self.output["gpt_output"] = gpt_output
 
