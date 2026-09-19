@@ -118,6 +118,9 @@ class Predictor:
         renderer = MeshRenderer()
         renderer.set_mesh(mesh)
         renderer.render_config.vertexColors = True
+        # set_mesh normalises the mesh to a unit radius; the output vertices are in that frame.
+        # Callers that need millimetres (crown areas for the quality gate) scale back with this.
+        self.debug_output["mesh_scale_mm"] = float(renderer.scale)
         face_coverage_set = np.zeros(len(renderer.mesh.faces) + 1)
 
         i = 0
