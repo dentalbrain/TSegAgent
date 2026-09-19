@@ -1,4 +1,5 @@
 import json
+import time
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -27,6 +28,44 @@ torch.backends.cudnn.allow_tf32 = True
 sam3_root = os.path.join(os.path.dirname(sam3.__file__))
 torch.inference_mode().__enter__()
 
+
+# The 19 fixed views SAM3 segments from. They were tuned for a jaw whose occlusal surface faces
+# +Z, i.e. a lower arch as scanners export it.
+SELECTED_FRAMES = [
+    [40, 0, 0],
+    [30, 0, 0],
+    [20, 0, 0],
+    [10, 0, 0],
+    [0, 0, 0],
+    [-10, 0, 0],
+    [-20, 0, 0],
+    [-30, 0, 0],
+    [-40, 0, 0],
+    [30, 60, 180],
+    [30, -60, 180],
+    [30, 30, 180],
+    [30, -30, 180],
+    [-90, 0, 0],
+    [-80, 0, 0],
+    [-70, 0, 0],
+    [100, 180, 0],
+    [120, 180, 30],
+    [120, 180, -30]
+]
+
+# Rigid poses tried before segmentation. Scanners export the upper arch occlusal-side down, and
+# a jaw rendered from its gingival side leaves most faces unseen by every view: rid 466 upper
+# reached only 32% face coverage as delivered and 80% after a half turn about X, the same as
+# its lower (81%). Coverage is measured from the id maps alone (no SAM3), so trying all three
+# costs seconds. Order matters: on a tie the earlier entry wins, and `identity` is kept whenever
+# it is within ORIENTATION_TOLERANCE of the best so a good mesh is never flipped needlessly.
+ORIENTATION_CANDIDATES = [
+    ("identity", np.eye(3)),
+    ("flip_x", np.diag([1.0, -1.0, -1.0])),
+    ("flip_y", np.diag([-1.0, 1.0, -1.0])),
+]
+ORIENTATION_TOLERANCE = 0.02
+
 class Predictor:
     def __init__(self, cache_path='./download', use_gpt=True, gpt_model=MODELS['chatgpt-5'], confidence_threshold=0.5):
         self.cache_path = cache_path
@@ -49,13 +88,25 @@ class Predictor:
 
         logger.info(f"SAM3 model loaded from {self.cache_path}")
 
-    def predict(self, model_path, text_prompt='tooth', extra_frames=None):
+    def predict(self, model_path, text_prompt='tooth', extra_frames=None, orientation='auto'):
         self.current_model_path = model_path
         # init
         self.output = None
         self.debug_output = {}
 
         mesh = trimesh.load(model_path, process=False)
+        chosen, coverage_by_pose, orientation_seconds = self.select_orientation(mesh, orientation)
+        self.debug_output["orientation"] = {
+            "chosen": chosen,
+            "coverage": coverage_by_pose,
+            "seconds": round(orientation_seconds, 3),
+        }
+        if chosen != "identity":
+            rotation = dict(ORIENTATION_CANDIDATES)[chosen]
+            transform = np.eye(4)
+            transform[:3, :3] = rotation
+            mesh.apply_transform(transform)
+        sam3_started = time.time()
         vn = np.concatenate([mesh.vertices, mesh.vertex_normals], axis=1)
         curv = model_curvature(vn)
         curv = (curv - curv.min()) / (curv.max() - curv.min())
@@ -80,27 +131,7 @@ class Predictor:
             "predicts": []
         }
 
-        selected_frames = [
-            [40, 0, 0],
-            [30, 0, 0],
-            [20, 0, 0],
-            [10, 0, 0],
-            [0, 0, 0],
-            [-10, 0, 0],
-            [-20, 0, 0],
-            [-30, 0, 0],
-            [-40, 0, 0],
-            [30, 60, 180],
-            [30, -60, 180],
-            [30, 30, 180],
-            [30, -30, 180],
-            [-90, 0, 0],
-            [-80, 0, 0],
-            [-70, 0, 0],
-            [100, 180, 0],
-            [120, 180, 30],
-            [120, 180, -30]
-        ]
+        selected_frames = list(SELECTED_FRAMES)
         if extra_frames:
             selected_frames = selected_frames + list(extra_frames)
         for R in selected_frames:
@@ -110,7 +141,7 @@ class Predictor:
             output_dict["renders"].append(np.asarray(rendered))
             output_dict["id_maps"].append(id_map)
 
-            face_coverage_set[np.unique(id_map[id_map > -1])] = 1
+            face_coverage_set[np.unique(id_map[id_map > 0])] = 1
 
             inference_state = self.processor.set_image(rendered)
             self.processor.reset_all_prompts(inference_state)
@@ -136,11 +167,46 @@ class Predictor:
             "face_labels": face_labels
         }
 
-        self.debug_output["face_coverage"] = np.sum(face_coverage_set > 0) / len(renderer.mesh.faces)
-        # logger.info(f'Face coverage: {np.sum(face_coverage_set > 0) / len(renderer.mesh.faces)}')
+        self.debug_output["face_coverage"] = float(np.sum(face_coverage_set[1:] > 0) / len(renderer.mesh.faces))
+        self.debug_output["sam3_seconds"] = round(time.time() - sam3_started, 3)
 
         if self.use_gpt:
+            vlm_started = time.time()
             self._generate_fdi_predict_images(renderer)
+            self.debug_output["vlm_seconds"] = round(time.time() - vlm_started, 3)
+
+    def select_orientation(self, mesh, orientation='auto'):
+        """Pick the rigid pose under which the fixed views see the most faces.
+
+        Returns (name, {name: coverage}, seconds). `orientation` may be 'auto', a candidate
+        name to force, or None to skip (identity, nothing measured).
+        """
+        if orientation is None:
+            return "identity", {}, 0.0
+        names = [name for name, _ in ORIENTATION_CANDIDATES]
+        if orientation != 'auto':
+            if orientation not in names:
+                raise ValueError(f"unknown orientation {orientation!r}; expected one of {names}")
+            return orientation, {}, 0.0
+        started = time.time()
+        renderer = MeshRenderer()
+        coverage_by_pose = {}
+        for name, rotation in ORIENTATION_CANDIDATES:
+            candidate = mesh.copy()
+            transform = np.eye(4)
+            transform[:3, :3] = rotation
+            candidate.apply_transform(transform)
+            renderer.set_mesh(candidate)
+            seen = np.zeros(len(candidate.faces) + 1, dtype=bool)
+            for R in SELECTED_FRAMES:
+                renderer.set_rotation(R)
+                id_map = renderer.render_id_map()
+                seen[np.unique(id_map[id_map > 0])] = True
+            coverage_by_pose[name] = round(float(seen[1:].mean()), 4)
+        best = max(names, key=lambda name: coverage_by_pose[name])
+        chosen = "identity" if coverage_by_pose["identity"] >= coverage_by_pose[best] - ORIENTATION_TOLERANCE else best
+        logger.info(f"orientation {chosen} coverage={coverage_by_pose}")
+        return chosen, coverage_by_pose, time.time() - started
 
     def _generate_fdi_predict_images(self, renderer):
         vertices, faces, face_labels = self.output["vertices"], self.output["faces"], self.output["face_labels"]

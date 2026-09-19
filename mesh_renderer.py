@@ -138,6 +138,14 @@ class MeshRenderer:
         id_map[id_map > len(self.mesh.faces)] = -1
         return Image.fromarray(rendered.astype(np.uint8)), id_map
 
+    def render_id_map(self):
+        """Face-id map only for the current rotation; no colour pass, no image."""
+        _, _, self.camera_config.zoom, T = self._compute_orthographic_zoom()
+        self.camera_config.T = [T[0], T[1], 1]
+        id_map = np.array(rr.render_id_map(self.instance, self.rrmesh, self.camera_config, self.render_config))
+        id_map[id_map > len(self.mesh.faces)] = -1
+        return id_map
+
     def render(self):
         rotated_vertices, rotated_vertex_normals, self.camera_config.zoom, T = self._compute_orthographic_zoom()
         self.camera_config.T = [T[0], T[1], 1]
